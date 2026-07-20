@@ -1,16 +1,37 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Copy, Check, ThumbsUp, ThumbsDown, RotateCcw, Pencil, User, BrainCircuit, AlertCircle } from "lucide-react";
+import { Copy, Check, ThumbsUp, ThumbsDown, RotateCcw, Pencil, User, BrainCircuit, AlertCircle, Clock } from "lucide-react";
 import { cn } from "@/lib/utils.ts";
 import type { Doc } from "../../../../convex/_generated/dataModel";
 import MarkdownRenderer from "./markdown-renderer.tsx";
 import { toast } from "sonner";
+import { Spinner } from "../../../components/ui/spinner.tsx";
 
 interface Props {
   message: Doc<"messages">;
   isLast?: boolean;
   onRegenerate?: () => void;
   onEditResend?: (newContent: string) => void;
+}
+
+function formatTimestamp(timestamp: number): string {
+  const date = new Date(timestamp);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+
+  if (diffMins < 1) return "now";
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays < 7) return `${diffDays}d ago`;
+
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: date.getFullYear() !== now.getFullYear() ? "numeric" : undefined,
+  });
 }
 
 export default function MessageBubble({ message, isLast, onRegenerate, onEditResend }: Props) {
@@ -89,10 +110,25 @@ export default function MessageBubble({ message, isLast, onRegenerate, onEditRes
 
       {/* Content + Actions */}
       <div className={cn("flex flex-col gap-1.5 max-w-[80%]", isUser && "items-end")}>
+        {/* Timestamp */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.3, delay: 0.1 }}
+          className={cn(
+            "flex items-center gap-1 text-xs text-muted-foreground px-1",
+            isUser && "flex-row-reverse"
+          )}
+          title={new Date(message._creationTime).toLocaleString()}
+        >
+          <Clock className="size-3" />
+          <span>{formatTimestamp(message._creationTime)}</span>
+        </motion.div>
+
         {/* Bubble */}
         <div
           className={cn(
-            "rounded-2xl px-4 py-3 text-sm leading-relaxed",
+            "rounded-2xl px-4 py-3 text-sm leading-relaxed min-w-[60px]",
             isUser
               ? "bg-primary text-primary-foreground rounded-tr-sm"
               : isError
@@ -101,16 +137,10 @@ export default function MessageBubble({ message, isLast, onRegenerate, onEditRes
           )}
         >
           {isStreaming && !message.content ? (
-            /* Animated typing dots */
-            <div className="flex gap-1.5 py-1 px-1 items-center">
-              {[0, 150, 300].map((delay) => (
-                <motion.span
-                  key={delay}
-                  animate={{ y: [0, -5, 0], opacity: [0.4, 1, 0.4] }}
-                  transition={{ duration: 0.8, repeat: Infinity, delay: delay / 1000, ease: "easeInOut" }}
-                  className="size-1.5 rounded-full bg-current"
-                />
-              ))}
+            /* Loader State */
+            <div className="flex items-center gap-2.5 py-1 px-1">
+              <Spinner className="size-3.5 text-primary" />
+              <span className="text-muted-foreground animate-pulse">Thinking...</span>
             </div>
           ) : editing ? (
             <div className="flex flex-col gap-2 min-w-[240px]">
@@ -140,13 +170,19 @@ export default function MessageBubble({ message, isLast, onRegenerate, onEditRes
           ) : isUser ? (
             <div className="whitespace-pre-wrap">{message.content}</div>
           ) : (
-            <div>
+            <div className="relative">
+              {isError && (
+                <div className="flex items-center gap-2 mb-2 pb-2 border-b border-destructive/20 text-destructive font-medium">
+                  <AlertCircle className="size-4" />
+                  <span>Error</span>
+                </div>
+              )}
               <MarkdownRenderer content={message.content} />
               {isStreaming && (
                 <motion.span
                   animate={{ opacity: [1, 0, 1] }}
                   transition={{ duration: 0.8, repeat: Infinity }}
-                  className="inline-block w-0.5 h-4 bg-current ml-0.5 align-middle"
+                  className="inline-block w-0.5 h-4 bg-primary ml-0.5 align-middle"
                 />
               )}
             </div>
@@ -155,7 +191,7 @@ export default function MessageBubble({ message, isLast, onRegenerate, onEditRes
 
         {/* Action bar */}
         <AnimatePresence>
-          {isDone && !editing && (
+          {(isDone || isError) && !editing && (
             <motion.div
               initial={{ opacity: 0, y: -4 }}
               animate={{ opacity: isLast ? 1 : undefined, y: 0 }}
@@ -179,23 +215,27 @@ export default function MessageBubble({ message, isLast, onRegenerate, onEditRes
 
               {!isUser && (
                 <>
-                  <ActionButton
-                    onClick={() => handleFeedback("up")}
-                    title="Good response"
-                    active={feedback === "up"}
-                    activeClass="text-green-400"
-                  >
-                    <ThumbsUp className="size-3.5" />
-                  </ActionButton>
+                  {!isError && (
+                    <>
+                      <ActionButton
+                        onClick={() => handleFeedback("up")}
+                        title="Good response"
+                        active={feedback === "up"}
+                        activeClass="text-green-400"
+                      >
+                        <ThumbsUp className="size-3.5" />
+                      </ActionButton>
 
-                  <ActionButton
-                    onClick={() => handleFeedback("down")}
-                    title="Bad response"
-                    active={feedback === "down"}
-                    activeClass="text-destructive"
-                  >
-                    <ThumbsDown className="size-3.5" />
-                  </ActionButton>
+                      <ActionButton
+                        onClick={() => handleFeedback("down")}
+                        title="Bad response"
+                        active={feedback === "down"}
+                        activeClass="text-destructive"
+                      >
+                        <ThumbsDown className="size-3.5" />
+                      </ActionButton>
+                    </>
+                  )}
 
                   {isLast && onRegenerate && (
                     <ActionButton onClick={onRegenerate} title="Regenerate response">
