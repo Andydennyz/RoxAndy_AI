@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { useMutation, useQuery } from "convex/react";
+import { useMutation, useQuery, useAction } from "convex/react";
 import { motion } from "motion/react";
 import { api } from "@/convex/_generated/api.js";
 import { Sparkles, Code, Globe, Zap, BrainCircuit } from "lucide-react";
@@ -21,8 +21,11 @@ const SUGGESTIONS = [
 export default function NewChatView() {
   const navigate = useNavigate();
   const [selectedModelId, setSelectedModelId] = useState(DEFAULT_MODEL.id);
+  const [isSending, setIsSending] = useState(false);
   const createConversation = useMutation(api.conversations.create);
   const addMessage = useMutation(api.messages.add);
+  const updateContent = useMutation(api.messages.updateContent);
+  const chatAction = useAction(api.ai.chat);
   const currentUser = useQuery(api.users.getCurrentUser, {});
 
   // Apply user's default model preference once loaded
@@ -34,17 +37,65 @@ export default function NewChatView() {
   }, [currentUser?.defaultModel]);
 
   const handleSend = async (content: string) => {
+    if (isSending) return;
+    setIsSending(true);
     const model = getModel(selectedModelId);
+    
     try {
+      // 1. Create conversation
       const convId = await createConversation({
         title: content.slice(0, 60) + (content.length > 60 ? "..." : ""),
         model: model.id,
         gateway: model.gateway,
       });
-      await addMessage({ conversationId: convId, role: "user", content, status: "done" });
+
+      // 2. Add user message
+      await addMessage({ 
+        conversationId: convId, 
+        role: "user", 
+        content, 
+        status: "done" 
+      });
+
+      // 3. Navigate immediately so the user sees the chat screen
       navigate(`/c/${convId}`);
-    } catch {
+
+      // 4. Create assistant placeholder and trigger AI (this happens in background after navigation)
+      const assistantMsgId = await addMessage({
+        conversationId: convId,
+        role: "assistant",
+        content: "",
+        status: "streaming",
+      });
+
+      try {
+        const systemPrompt = currentUser?.systemPrompt;
+        const messages = systemPrompt 
+          ? [{ role: "system" as const, content: systemPrompt }, { role: "user" as const, content }]
+          : [{ role: "user" as const, content }];
+
+        const result = await chatAction({
+          conversationId: convId,
+          messages,
+          modelId: selectedModelId,
+          assistantMessageId: assistantMsgId,
+        });
+
+        await updateContent({ id: assistantMsgId, content: result, status: "done" });
+      } catch (err) {
+        console.error("AI Error:", err);
+        await updateContent({
+          id: assistantMsgId,
+          content: "Sorry, I encountered an error. Please try again.",
+          status: "error",
+        });
+        toast.error("AI response failed");
+      }
+    } catch (err) {
+      console.error("Conversation Error:", err);
       toast.error("Failed to start conversation");
+    } finally {
+      setIsSending(false);
     }
   };
 
@@ -58,13 +109,13 @@ export default function NewChatView() {
       {/* Main content */}
       <div className="flex-1 flex flex-col items-center justify-center px-4 pb-32 relative">
         {/* Hero */}
-            <motion.div
+        <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, ease: "easeOut" }}
           className="flex flex-col items-center gap-3 mb-10 text-center"
         >
-            <motion.div
+          <motion.div
             initial={{ scale: 0.7, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             transition={{ duration: 0.45, delay: 0.05, ease: [0.34, 1.56, 0.64, 1] as const }}
@@ -102,7 +153,8 @@ export default function NewChatView() {
               whileHover={{ scale: 1.02, y: -1 }}
               whileTap={{ scale: 0.98 }}
               onClick={() => handleSend(label)}
-              className="flex items-start gap-2.5 p-3 rounded-xl bg-card border border-border text-left text-sm text-muted-foreground hover:text-foreground hover:bg-card/80 hover:border-primary/30 transition-colors cursor-pointer"
+              disabled={isSending}
+              className="flex items-start gap-2.5 p-3 rounded-xl bg-card border border-border text-left text-sm text-muted-foreground hover:text-foreground hover:bg-card/80 hover:border-primary/30 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Icon className="size-4 mt-0.5 text-primary shrink-0" />
               <span>{label}</span>
@@ -123,7 +175,7 @@ export default function NewChatView() {
             selectedModelId={selectedModelId}
             onModelChange={setSelectedModelId}
           />
-          <ChatInput onSend={handleSend} disabled={false} />
+          <ChatInput onSend={handleSend} disabled={isSending} />
         </div>
       </motion.div>
     </div>
