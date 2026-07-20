@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Copy, Check, ThumbsUp, ThumbsDown, RotateCcw, Pencil, User, BrainCircuit, AlertCircle } from "lucide-react";
+import { Copy, Check, ThumbsUp, ThumbsDown, RotateCcw, Pencil, User, BrainCircuit, AlertCircle, Clock } from "lucide-react";
 import { cn } from "@/lib/utils.ts";
 import type { Doc } from "../../../../convex/_generated/dataModel";
 import MarkdownRenderer from "./markdown-renderer.tsx";
@@ -11,6 +11,27 @@ interface Props {
   isLast?: boolean;
   onRegenerate?: () => void;
   onEditResend?: (newContent: string) => void;
+}
+
+function formatTimestamp(timestamp: number): string {
+  const date = new Date(timestamp);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+
+  if (diffMins < 1) return "now";
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays < 7) return `${diffDays}d ago`;
+
+  // Format as date for older messages
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: date.getFullYear() !== now.getFullYear() ? "numeric" : undefined,
+  });
 }
 
 export default function MessageBubble({ message, isLast, onRegenerate, onEditResend }: Props) {
@@ -89,6 +110,21 @@ export default function MessageBubble({ message, isLast, onRegenerate, onEditRes
 
       {/* Content + Actions */}
       <div className={cn("flex flex-col gap-1.5 max-w-[80%]", isUser && "items-end")}>
+        {/* Timestamp */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.3, delay: 0.1 }}
+          className={cn(
+            "flex items-center gap-1 text-xs text-muted-foreground px-1",
+            isUser && "flex-row-reverse"
+          )}
+          title={new Date(message._creationTime).toLocaleString()}
+        >
+          <Clock className="size-3" />
+          <span>{formatTimestamp(message._creationTime)}</span>
+        </motion.div>
+
         {/* Bubble */}
         <div
           className={cn(
